@@ -1,0 +1,378 @@
+##Looking into data surrounding the weight of new borns##
+
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+import statsmodels.api as sm
+from matplotlib.pyplot import subplots
+from statsmodels.stats.outliers_influence import variance_inflation_factor as VIF 
+from statsmodels.stats.anova import anova_lm
+import scipy.stats as stats
+from ISLP import load_data
+from ISLP.models import (ModelSpec as MS,
+                       summarize,
+                         poly)
+
+
+
+
+data=pd.read_csv(r"C:\Users\Dylan\OneDrive\Desktop\Data Science\Explloritory Data Analysis\baby_data.csv").drop('case',axis=1)
+data
+
+
+# 1. Clean and Check the data 
+
+
+
+
+data.dtypes
+
+data=data.rename(columns={'parity':'First Child'})
+data
+
+smoke_vals={0:'No',1:'Yes'}
+
+data['smoke']=data['smoke'].map(smoke_vals)
+data
+
+first_child_val={0:'Yes',1:'No'}
+
+data['First Child']=data['First Child'].map(first_child_val)
+data
+
+
+
+
+
+data.dtypes
+
+
+
+
+
+data.isna().sum()
+
+for var in data.columns:
+    data=data[data[var].notna()]
+data.isna().sum()
+data
+
+
+
+
+data
+#data['weight(kg)']=data['weight']/2.20462
+#data['height(m)']=data['height']*0.0254
+
+#data=data.drop(['weight','height'],axis=1)
+#data['weight(kg)']=np.round(data['weight(kg)'],3)
+#data['height(m)']=np.round(data['height(m)'],3)
+
+predictors=data.drop('bwt',axis=1)
+
+predictors
+
+
+
+
+numeric_variables=data.columns.drop(['First Child','smoke'])
+
+
+for predictor in numeric_variables:
+    ax=subplots(figsize=(7,7))[1]
+    ax.hist(x=data[predictor],bins=30)
+    ax.set_ylabel('Frequency')
+    ax.set_xlabel(predictor)
+    
+
+numeric_variables
+
+
+data
+
+
+
+data.columns
+
+descriptive_stat=[]
+for vari in numeric_variables:
+    dp=2
+    mean=np.round(data[vari].mean(),dp)
+    med=np.round(data[vari].median(),dp)
+    sd=np.round(data[vari].std(),dp)
+    lower=data[vari].quantile(q=[0.025,0.975]).iloc[0]
+    upper=data[vari].quantile(q=[0.025,0.975]).iloc[1]
+    
+   descriptive_stat.append(
+        {'Variables':vari,
+         'Mean':np.round(mean,dp),
+         'Median':med,
+        'Standard Dev':np.round(sd,dp),
+        '[lower,upper] 95%':[lower,upper]})
+    
+
+pd.DataFrame(descriptive_stat)
+
+
+
+# bwt: Apperas to be a symetric distribution. However due to the median being greater than the mean the distrubution is slightly negitive around the mean of 119.46oz with a standard deviation of 18.33oz, meaning 95% of the data lies between [81.0 , 155.0]oz
+# 
+# gestation : Apperas to be a symetric distribution.However due to the median being greater than the mean its slightly negitively skewed. Mean of 279.10 days with a standard deviation of 16.01 days, meaning 95% of the data lies between [243.325, 308.0] days.
+# 
+# age : Apperas to be a symetric distribution. However due to the mean being greater than the median its slightly positively skewed. Mean of 27.23 years with a standard deviation of 5.82 years, meaning 95% of the data lies between [19.0, 40.0] years.
+# 
+# height : Apperas to be a symetric distribution. However due to the mean being greater than the median its slightly positively skewed. Mean of 1.63 m with a standard deviation of 0.06 m, meaning 95% of the data lies between [1.499, 1.753] inches.
+# 
+# weight : Apperas to be a symetric distribution. However due to the mean being greater than the median its slightly positively skewed. Mean of 58.28 Kg with a standard deviation of 9.40 Kg, meaning 95% of the data lies between [44.452, 81.647] Kg.
+
+
+normal=[]
+for vari in numeric_variables:
+    t=stats.shapiro(data[vari])
+    normal.append({'Variable':vari,
+                    'Shapiro':t.statistic,
+                   'p-value':np.round(t.pvalue,4)})
+pd.DataFrame(normal)
+
+
+# Understanding the relationship between variables and response 
+
+
+data[numeric_variables.drop('bwt')].corr()
+
+
+# We see some collinearity within (weight, height) and (weight,age)
+# I will remove weight and height and replace with BMI, due to the collinearity between the predictors.
+
+
+data['bmi']=np.round(data['weight(kg)']/data['height(m)']**2,3)
+
+data[['gestation','age','bmi','weight(kg)','height(m)']].corr()
+
+
+# Creating SLR models with the predictors 
+
+
+numeric_pred=data.columns.drop(['bwt','First Child','smoke'])
+cater_pred=data.columns.drop(['bwt','gestation','age','bmi'])
+
+models=[]
+for predictor in numeric_pred:
+    x=MS([predictor]).fit_transform(data)
+    y=data['bwt']
+    model=sm.OLS(y,x).fit()
+    models.append(model)
+
+models
+
+Parameters=[]
+for model in models:
+    Parameters.append({'variable':model.model.exog_names[1],
+                        'coeff':model.params[1],
+                       'p-values':model.pvalues[1],
+                       'R^2':model.rsquared*100,
+                       'RSE':np.sqrt(model.scale)})
+    
+model_coefficent=pd.DataFrame(Parameters)
+
+error=model_coefficent['RSE'].mean()*100/y.mean()
+display(model_coefficent)
+print(f'Average Percentage error of models :{error}')
+
+
+# We can see the RSE is quite significant in all of these models, no single predictor is proficent in modeling the relationship
+
+
+
+
+for i in range(len(models)):
+    print(models[i].model.exog_names)
+    display(models[i].summary())
+    
+
+
+# Gestation : In this simple linear regresion we see the predictor is gestation, (the number of days from conception to birth) with the respnse of Birthweight in ounces from using the least quares error we gain the following model : Birthweight(oz)=-10.75 + 0.47*gestation, with the p-values 0.21 , 0.000, respectively this indicates that gestation is statistically significatnt due to its low p-value and high test statistic and we will use this in our multiple linear regresion. However we see the intercept has p-value 0.2 this does not a statiscially significant result. R^2 is 16.6% which is very poor more predictors are needed.
+
+# Age : Predictor is age, with resonse birthweight. We see age is not statistically significant in this SLR due to its high p-value, this model is very poor and gives us no infomation on the response: Birthweight=117+0.085*age.
+
+# Height :  Predictor is height, with resonse birthweight. We see age is statistically significant in this SLR due to its low p-value, this model is very poor and gives us limited infomation on the response: Birthweight=24.8+58.18*height.
+
+# Weight : Predictor is weight, with response birthweight. We see age is statistically significant in this SLR due to its low p-value, this model is very poor and gives us limited infomation on the response: Birthweight=101.7+0.0.30*weight.
+
+# BMI:  Predictor is bmi, with response birthweight. We see age is statistically significant in this SLR due to its low p-value, this model is very poor and gives us limited infomation on the response: Birthweight=111.48+0.0.36*bmi.
+
+# We can see the RSE for all the SLR is very high with an average of 14% from this we have deduced gestation has the margest effect on the response followed by height and weight these will be the foundation for our Multiple minear regresion model.
+
+# Looking into the Residuals we can determine outliers and gain more insight to the shape of the function
+
+
+
+for model in models:
+    ax=subplots(figsize=(8,8))[1]
+    ax.scatter(model.fittedvalues,model.resid)
+    ax.axhline(0)
+    ax.set_xlabel(model.model.exog_names[1])
+    
+
+
+# PLotting points of leverage to determine if there are points of high leverage which need to me removed.
+
+
+
+for model in models:
+    ax=subplots(figsize=(8,8))[1]
+    inf=model.get_influence()
+    inf=inf.hat_matrix_diag
+    mean=inf.mean()
+    sd=inf.std()
+    upper=mean+2*sd
+    lower=mean-2*sd
+    ax.scatter(np.arange(x.shape[0]),inf)
+    p=model.df_model+1
+    n=len(inf)
+    threshhold=2*(p)/n
+    ax.axhline(threshhold,color='r')
+    ax.set_xlabel(model.model.exog_names[1])
+
+
+# PLotting Stundentized residuals to get a more accurate picutre of which values are outliers using the t distrubution, any points grater than the abolute value of 3 must be removed.
+
+for model in models:
+    inf=model.get_influence().resid_studentized
+    ax=subplots(figsize=(8,8))[1]
+    ax.scatter(model.fittedvalues,inf)
+    ax.set_xlabel(model.model.exog_names[1])
+
+
+# Plotting Stundtized residuals against leverage to remove points which are both ouliers and high leverage this is due to the dramatic effect each point will have on the model.
+
+
+for model in models:
+    ax=subplots(figsize=(8,8))[1]
+    stud_res=model.get_influence().resid_studentized
+    leverage=model.get_influence().hat_matrix_diag
+    ax.scatter(leverage,stud_res)
+    ax.set_xlabel(model.model.exog_names[1])
+
+
+# Add a Q-Q plot for Normality - TO DO
+
+# Crating a MLR model using the following predictors :
+
+
+predictors=data[data.columns.drop('bwt')]
+
+predictors['smoke'],predictors['First Child']=predictors['smoke'].astype('category'),predictors['First Child'].astype('category')
+predictors.dtypes
+
+x=MS(predictors).fit_transform(predictors)
+y=data['bwt']
+#x
+
+model=sm.OLS(y,x).fit()
+model
+
+model.summary()
+
+
+# breakdowon hist of bwt and other predictos based on smoking sttus or not use this to help with domain lnledge and push the effects of smoking compared to not - TO DO
+
+# Here all the predictors was used within the model to see how each predictor would form in a larger MLR.
+ 
+# From this model we see the following predictors are likely statistically significant : [gestation, height, smoking status, weight, First child] this is due to the low p-values and high t- statistics. However there may be some cause for concern for [Weight, First Child] (TO DO ANYWAY TO TEST T STAT FURTHER?) due to the lower t statistic, this will be further examined. Age apperas to be the only predictor that is not statisticaly significant and therefore should be removed.
+
+
+
+ges_smoke_height=predictors[['gestation','bmi','smoke']]
+#predictors=predictors.drop(['weight(kg)','height(m)'], axis=1)
+predictors
+
+
+##listing all combinations, except duplicate predictors
+pair_list=[]
+for i in predictors:
+    for j in predictors: 
+        if i==j:
+            continue
+        pairs=[i,j]
+        pair_list.append(pairs)
+pair_list
+
+
+#Using list comprehension to remove duplicate pairs via set() function
+
+two_predictors=[tuple(sorted(list1)) for list1 in pair_list]
+two_predictors=list(set(two_predictors))
+
+
+#Creating models with each of the pairs of predictors 
+
+two_predictors
+models_two_pred=[]
+for pred in two_predictors:
+    x=MS(list(pred)).fit_transform(predictors)
+    y=data['bwt']
+    model=sm.OLS(y,x).fit()
+    models_two_pred.append(model)
+models_two_pred
+
+
+
+#Creating dataframe of R^2 and p-values to eva;uate the models 
+
+params_list=[]
+for model in models_two_pred:
+    if (model.pvalues[1] and model.pvalues[2]) <0.05:
+        val=True
+    dp=2
+    params={'predictors':[model.model.exog_names[1:]],
+                        'R^2' :model.rsquared,
+           'p-values':val}
+    params_list.append(params)
+    
+    
+params=pd.DataFrame(params_list)
+params.sort_values('R^2',ascending=False)
+
+
+# When applying 2 predictors to the model we do achive a better model than we would if we applied only 1 predictor, we can see gestation has a large effect on the response due to it being in the top 5 models. Smoking and Gestation performed the best out of all the models, we can also see height, weight are also high in R^2. Height and Weight do have some issues this is due to the collinearity they share i will be performing some feature engineering to reduce the effect this has on the model i am doing this by combining the two features into BMI. 
+
+
+three_pred=[]
+for i in predictors:
+    for j in predictors:
+        for k in predictors:
+            if i==j or i==k or j==k or i==k==j:
+                continue
+            pred=[i,j,k]
+            three_pred.append(pred)
+three_pred
+
+three_pred=[tuple(sorted(sub)) for sub in three_pred]
+three_pred=list(set(three_pred))
+three_pred
+
+models_three=[]
+for pred in three_pred:
+    x=MS(list(pred)).fit_transform(predictors)
+    y=data['bwt']
+    model=sm.OLS(y,x).fit()
+    models_three.append(model)
+models_three
+
+
+params_list=[]
+for model in models_three:
+    if model.pvalues[1] and model.pvalues[2] and model.pvalues[3]:
+        val=True
+    three_predictos={'predictors':model.model.exog_names,
+                                  'R^2': model.rsquared,
+                                  'p-value' : val }
+    params_list.append(three_predictos)
+    
+pd.DataFrame(params_list).sort_values('R^2', ascending=False)
+
+# When applying 2 predictors to the model we do achive a better model than we would if we applied only 1 predictor, we can see 
+
+
+predictors
