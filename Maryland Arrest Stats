@@ -1,0 +1,180 @@
+##A look into arrest data and trends##
+
+#Reading in the data, importing modules##
+
+import pandas as pd
+from matplotlib.pyplot import subplots
+import numpy as np
+
+data=pd.read_csv(r"C:\Users\Dylan\OneDrive\Desktop\Data Science\Arrests.csv").reset_index(drop=True)
+
+data.head()
+
+##Null values##
+data.isna().sum()
+
+##Data types##
+
+data.dtypes
+data['Event Date/Time']=pd.to_datetime(data['Event Date/Time'])
+data.dtypes
+data[data.duplicated()]
+
+data.isna().sum()
+
+##Spliting data to remove null values so its easier to work with##
+
+print(data.columns)
+data_new=data[['Event Date/Time',"Subject's race", "Subject's gender",
+       "Subject's age", 'Ethnicity','Adjacent to School']]
+data_new
+
+###Will add Year, Month, day, Weekday## 
+
+data_new=data_new.sort_values(by='Event Date/Time').reset_index(drop=True)
+data_new['Year']=data_new['Event Date/Time'].dt.year
+data_new['Month']=data_new['Event Date/Time'].dt.month
+data_new['Day']=data_new['Event Date/Time'].dt.day
+data_new['Day_name']=data_new['Event Date/Time'].dt.day_name()
+data_new['Time']=data_new['Event Date/Time'].dt.time
+data_new
+
+
+##Number of Arrests between 2021 and 2024 grouped by Year
+
+Arrest_count_byYear=data_new.groupby('Year').count()['Event Date/Time']
+Arrest_count_byYear.plot(kind='line',x='Year')
+
+
+##Trend in Arrest by both Year and Month##
+
+Arrest_count_byYearMonth=data_new.groupby(['Year','Month']).count()['Event Date/Time']
+Arrest_count_byYearMonth=pd.DataFrame(Arrest_count_byYearMonth).reset_index()
+Arrest_count_byYearMonth
+Without_outlier=Arrest_count_byYearMonth[(Arrest_count_byYearMonth['Event Date/Time']!=3)]
+Without_outlier
+
+##Taking 3 to be an outlier##
+
+Without_outlier.plot(kind='line',y='Event Date/Time')
+Without_outlier.plot(kind='bar',y='Event Date/Time')
+
+##Will remove the three arrest that happenf in 7th Month of 2024##
+
+data_new=data_new.drop(index=[23507,23508,23509])
+data_new['Month_name']=data_new['Event Date/Time'].dt.month_name()
+data_new
+
+
+
+Years21_23_count=data_new[['Year','Month_name','Event Date/Time']]
+Years21_23_count=Years21_23_count.groupby(['Year','Month_name']).count().sort_values(by=['Year','Month_name'])
+Years21_23_count=Years21_23_count.reset_index()
+Years21_23_count['Arrests']=Years21_23_count['Event Date/Time']
+Years21_23_count=Years21_23_count[['Year','Month_name','Arrests']]
+
+##Grouped by year and month to count the number of arrest ## Couldnt sort by cronilogical order had to make category to sort by##
+
+months=['January',
+ 'February',
+ 'March',
+ 'April',
+ 'May',
+ 'June',
+ 'July',
+ 'August',
+ 'September',
+ 'October',
+ 'November',
+ 'December']
+
+##Alot of disgiusting shit compiling the different years to plot in one graph##
+
+Years21_23_count['Month_name'] = pd.Categorical(Years21_23_count['Month_name'], categories=months, ordered=True)
+Years21_23_count=Years21_23_count.sort_values(by=['Year','Month_name'])
+
+              
+Year21=Years21_23_count[Years21_23_count['Year']==2021][['Month_name','Arrests']].reset_index()
+Year21['Month']=Year21['Month_name']  
+Year21['Arrests21']=Year21['Arrests']
+
+Year22=Years21_23_count[Years21_23_count['Year']==2022][['Month_name','Arrests']].reset_index()
+Year22['Arrests22']=Year22['Arrests']
+
+Year23=Years21_23_count[Years21_23_count['Year']==2023][['Month_name','Arrests']].reset_index()
+Year23['Arrests23']=Year23['Arrests']
+
+Year24=Years21_23_count[Years21_23_count['Year']==2024][['Month_name','Arrests']].reset_index() 
+Year24['Arrests24']=Year24['Arrests']
+
+Month_data=pd.concat([Year21,Year22,Year23,Year24],axis=1)[['Month','Arrests21','Arrests22','Arrests23','Arrests24']]
+Month_data
+Month_data.plot(kind='line',x='Month',y=['Arrests21','Arrests22','Arrests23','Arrests24'],figsize=(15,10))
+
+##Is there a day which theres more arrests than another##
+
+Day_week=pd.DataFrame(data_new[['Day_name','Event Date/Time']].groupby('Day_name').count()).reset_index()
+Day_week['Arrests']=Day_week['Event Date/Time']
+Day_week.drop('Event Date/Time',axis=1,inplace=True)
+Day_week['Percentage']=Day_week['Arrests']*100/Day_week['Arrests'].sum()
+Day_week.plot(x='Day_name',y='Arrests',kind='line')
+Day_week
+
+
+##Is there a time which theres more arrests##
+
+Day_time=pd.DataFrame(data_new[['Event Date/Time','Time']].groupby('Event Date/Time').count()).reset_index()
+Day_time['Arrests']=Day_time['Time']
+Day_time.drop('Time',axis=1,inplace=True)
+Day_time
+Day_time=Day_time.groupby(pd.Grouper(key='Event Date/Time',freq='30min')).sum().reset_index()
+Day_time['Time']=Day_time['Event Date/Time'].dt.time
+
+Day_time.drop('Event Date/Time',axis=1,inplace=True)
+Arrest_hours_day=Day_time.groupby('Time').sum().reset_index()
+Arrest_hours_day.plot(kind='line',x='Time')
+
+
+
+##Percentage split by race##
+
+Race_count=pd.DataFrame(data_new.groupby("Subject's race").count()['Event Date/Time'])
+Race_count['Arrests']=Race_count['Event Date/Time']
+Race_count.drop('Event Date/Time',axis=1,inplace=True)
+Race_count
+Race_count.plot.pie(y='Arrests',autopct='%1.0f%%',radius=1).legend(loc='upper right',bbox_to_anchor=(1.8, 1.2),)
+Race_count['Percentage']=Race_count['Arrests']*100/Race_count['Arrests'].sum()
+Race_count.insert(2,'Population Percentage',[0.2,6.9,30.4,'NA','NA',48.3],True)
+Race_count
+
+
+##Cromes split by District##
+
+Dist_arrest=pd.DataFrame(data['District of occurrence'].value_counts())
+Dist_arrest['Arrests']=Dist_arrest['District of occurrence']
+Dist_arrest.drop('District of occurrence', axis=1,inplace=True)
+Dist_arrest.plot(kind='pie',y='Arrests',autopct='%1.0f%%').legend(loc='upper right',bbox_to_anchor=(1.15,1.1))
+
+Dist_arrest
+
+
+##Crimes split by gender##
+
+Gender_split=pd.DataFrame(data_new["Subject's gender"].value_counts()).reset_index()
+Gender_split['Arrests']=Gender_split["Subject's gender"]
+Gender_split.drop("Subject's gender",axis=1,inplace=True)
+Gender_split["Percentage"]=Gender_split['Arrests']*100/Gender_split['Arrests'].sum()
+Gender_split.rename(columns={'index':"Gender"},inplace=True)
+Gender_split.set_index('Gender',inplace=True)
+Gender_split.plot(kind='pie',y='Arrests',autopct='%1.0f%%',x='Gender')
+
+
+##Boxplot of ages by gender##
+
+boxplot_age_gender=pd.DataFrame(data_new[["Subject's gender","Subject's age"]])
+boxplot_age_gender.plot(kind='box',by="Subject's gender")
+boxplot_age_gender.groupby("Subject's gender").describe()
+data_new[data_new["Subject's age"]==1]
+
+
+
