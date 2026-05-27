@@ -1,0 +1,458 @@
+
+1. Loading Data & libraries
+
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+#import folium
+import datetime as dt
+
+data=pd.read_csv(r"C:\Users\Dylan\OneDrive\Desktop\renewable_power_plants_UK.csv")
+data
+
+
+2. Feature Engineering & Data Cleaning
+
+#Converting data into Dataframe so I can work with it 
+data=pd.DataFrame(data)
+data.columns
+
+#Inspecting the values within each column, overview of the data and values inside
+for i in data.columns:
+    print(i,data[i].unique())
+
+#Removed 'comment','uk beis id', 'data source', 'nuts region' 1,2,3, 'postcode', address
+#Didnt really need these wasnt adding much
+
+data=data[['electrical_capacity', 'energy_source_level_1', 'energy_source_level_2',
+       'energy_source_level_3', 'technology', 'lon', 'lat', 'municipality', 'region', 'country', 'commissioning_date',
+       'solar_mounting_type', 'capacity_individual_turbine',
+       'number_of_turbines', 'site_name', 'operator']]
+
+#Renaming columns
+data=data.rename(columns={'electrical_capacity':'Capacity(MW)',
+                          'energy_source_level_1':'Renewable Energy',
+                          'energy_source_level_2':'Technology',
+                          'energy_source_level_3':'Fuel',
+                          'technology':'Technology_More',
+                          'municipality':'Region',
+                          'region':'Region2',
+                          'country':'Country',
+                          'commissioning_date':'Commissioning'})
+
+
+#Looking for glearing inconsistensies within the columns, e.g strings in only numeric columns
+for i in data.columns:
+    print(i,data[i].unique())
+
+#Glaring error
+#In the cell above i noticed a string in the Capacity so i started removing that here
+
+#Using the .find() function to search for the letter 'a' in my Capacity values, 
+#then creating a variable num to return the position of that string, this should not return any value
+#in this case 'a' apears in the 19th position and is greater than 0 so it returns me the index of this anomaly
+
+for i in range(0,len(data['Capacity(MW)'])):
+    num=data['Capacity(MW)'][i].find('a')
+    if num>0:
+        print(num,i)
+
+#Identifying and removing the issue
+issue=data.iloc[1650]
+data=data.drop(1650)
+
+#Checking data types
+for i in data.columns:
+    print(i,data[i].dtypes)
+
+data['Capacity(MW)']=data['Capacity(MW)'].astype('float64')
+
+#Before changing datatype of Renewables i need to change values
+#I can see in this column theres 'Renewable energy' and 'Na' so i wanted to change that to binary so it would 
+#be easier for data analysis later on
+
+def renew_check(val):
+    if val=='Renewable energy':
+        return 'Yes'
+    else:
+        return 'No'
+
+data['Renewable Energy']=data['Renewable Energy'].apply(renew_check)
+
+for i in data.columns:
+    print(i,data[i].unique())
+
+#After removing the string from Capacity it also removed the null value from 'Renewable energy' so now being only being one 
+#value this column isnt adding extra infomation so i will remove it and the data is only renewable power plants
+
+data.drop(columns={'Renewable Energy'},inplace=True)
+
+#Renaming because all Renewables Technology is Na within this column so making name more clear
+data.rename(columns={'Fuel':'BioFuel'},inplace=True)
+
+
+data['BioFuel'].notna().sum()
+data['BioFuel'].isna().sum()
+data.count()
+
+
+#Investigating the values associated with Na and not Na values
+cond=data['BioFuel'].isna()
+pd.DataFrame(data[cond])['Technology'].unique()
+
+
+condi=data['BioFuel'].notna()
+pd.DataFrame(data[condi])['Technology'].unique()
+
+#Replacing Na with None
+data['BioFuel'].replace({np.nan:None},inplace=True)
+
+#Checking the lon,lat values all fall within correct range
+
+print(data[['lon','lat']].count())
+
+Condition= (data['lon']>=-180) & (data['lon']<=180)
+print(data[Condition].count()['lon'])
+
+Condition= (data['lat']>=-90) & (data['lat']<=90)
+data[Condition].count()['lat']  
+
+data[['Region', 'Region2', 'Country']]
+
+cols=['Region', 'Region2', 'Country']
+
+for col in cols:
+    print(col,data[col].unique(),data[col].isna().sum())
+    
+cond=data['Region'].isna()
+data[cond]
+
+##Removing the Na value due to its site not being a power station
+cond=data['site_name']!="Sainsbury's Stores (169 individual Stores)"
+data=data[cond]
+
+data[data['Region'].isna()]
+
+#Removing Region2 due to the lack of extra infomation also the lack of diversity within the values
+
+data.drop(columns={'Region2'},inplace=True)
+
+#Moving to Technology column
+
+#Creating a new column named 'Offshore', this can then be used in my analysis later on 
+#This Technology_more in its current state is too broad of a column
+
+print(data['Technology_More'].unique())
+
+condition=data['Technology_More'].isin(['Onshore','Offshore'])
+test=data[condition]
+
+def Onshore_col(val):
+    if val=='Onshore':
+        return 'Yes'
+    elif val== 'Offshore':
+        return 'No'
+    else:
+        return None
+    
+data['Onshore']=data['Technology_More'].apply(Onshore_col)
+data
+
+
+condition=data['Technology_More']=='Photovoltaics'
+test=data[condition]
+
+#Created new column Sub Technology and added pumped storage and PV#
+
+def Sub_Tech(val):
+    if val=='Pumped storage':
+        return 'Pumped Storage'
+    elif val=='Photovoltaics':
+        return 'PV'
+    else:
+        return 'None'
+
+data['Sub Technology']=data['Technology_More'].apply(Sub_Tech)
+data
+
+# Replaced None with 'No Infomation'
+
+data['Sub Technology']=data['Sub Technology'].replace('None','No Infomation')
+data
+
+#I can now remove Technology_more column 'Other', 'unspecified' are two unknown placeholders so 'None'
+#in our most recent function covers these
+
+data.drop(columns={'Technology_More'},inplace=True)
+
+##Changed datatype for commisoning date so i can manipulate it later on 
+data['Commissioning'].dtypes
+data['Commissioning']=pd.to_datetime(data['Commissioning'],format='%d/%m/%Y')
+
+#Looking at Solar mounting type (making sure only values are filled corresponding to Solar)
+
+data=data.rename(columns={'solar_mounting_type':'Solar Mounting Type'})
+
+cond=(data['Solar Mounting Type'].notna()) & (data['Technology']!='Solar')
+
+test=data[cond]
+print(test)
+data
+
+##Turbine capacity making sure turbinesa are corresponding
+data['capacity_individual_turbine'].unique()
+con=data['capacity_individual_turbine'].notna()
+
+data[con]['Technology'].unique() ##Checking the technologies with the associated turbine values 
+data.dtypes
+
+##Number of Turbines##
+data['number_of_turbines'].unique()
+con=data['number_of_turbines'].isna() ##Checking the technologies with the associated turbine values 
+
+data[con]['Technology'].unique()
+
+Year on Year Capacity Growth
+
+###This is the New Capacity each year from the Projects### To make this more accurate and informative change year 
+##so all years are counted place 0 for Capacity Values
+
+New_Capacity_time=pd.DataFrame(data[['Capacity(MW)','Commissioning']])
+New_Capacity_time['Year']=New_Capacity_time['Commissioning'].dt.year
+New_Capacity_time=New_Capacity_time[['Capacity(MW)','Year']].groupby('Year').sum().reset_index('Year')
+
+fig,ax=plt.subplots(figsize=(10,6))
+New_Capacity_time.plot(kind='line',x='Year',y='Capacity(MW)',ax=ax,legend=None)
+
+plt.xlabel('Year')
+plt.ylabel('Capacity(MW)')
+plt.title('New Capacity')
+
+x=list(range(1906,2021,1))
+
+New_Capacity_time
+df2=pd.DataFrame({'Year':x})
+df2
+
+New_Capacity_time=pd.merge(df2,New_Capacity_time,how='left',on=['Year']).fillna(0)
+fig,ax=plt.subplots(figsize=(10,6))
+New_Capacity_time.plot(kind='line',x='Year',y='Capacity(MW)',ax=ax,legend=None)
+
+plt.xlabel('Year')
+plt.ylabel('Capacity(MW)')
+plt.title('New Capacity')
+
+
+Cumulative_Capacity=pd.DataFrame({'Year':New_Capacity_time['Year'],
+      'Cumulative':New_Capacity_time['Capacity(MW)'].cumsum()})
+
+fig,ax=plt.subplots(figsize=(10,5))
+
+Cumulative_Capacity=pd.merge(df2,Cumulative_Capacity,how='left',on=['Year'])
+Cumulative_Capacity.plot(kind='line',x='Year',y='Cumulative',ax=ax)
+
+plt.xlabel('Year')
+plt.ylabel('Cumulative Capacity(MW)')
+plt.title('Cumlative Capacity')
+
+year1=Cumulative_Capacity['Year']==2010
+year2=Cumulative_Capacity['Year']==2020
+
+value=(int(Cumulative_Capacity[year2]['Cumulative'])-int(Cumulative_Capacity[year1]['Cumulative']))*100/int(Cumulative_Capacity[year1]['Cumulative'])
+value
+
+data['Capacity(MW)'].plot(kind='hist', bins=100,xlim=[0,150])
+data['Capacity(MW)'].describe()
+
+#From this graph we can see the distruution of Capacity, this tells us the vast majority of the Power plants have
+
+TechnologyStats=data[['Capacity(MW)','Technology']].groupby('Technology').describe()
+print(TechnologyStats)
+
+CapacityPie=data[['Capacity(MW)','Technology']].groupby('Technology').sum()
+
+CapacityPie.plot(kind='pie',y='Capacity(MW)',x='Technology',autopct='%1.1f%%',legend=None,figsize=(10,10))
+
+
+#As of X Year Wind has 55.2% of the intalled Wind Capacity in this sample of data 
+
+TechnologyStatsYear=data[['Commissioning','Capacity(MW)','Technology']]
+TechnologyStatsYear
+
+TechnologyStatsYear['Commissioning']=TechnologyStatsYear['Commissioning'].dt.year
+
+TechnologyStatsYear=TechnologyStatsYear.groupby(['Technology','Commissioning']).sum().reset_index()
+
+TechnologyStatsYear=TechnologyStatsYear.pivot_table(index='Commissioning',columns='Technology',values='Capacity(MW)').reset_index().fillna(0)
+
+#TechnologyStatsYear=TechnologyStatsYear[['Bioenergy','Hydro','Marine','Solar','Wind']].cumsum()
+tech=['Bioenergy','Hydro','Marine','Solar','Wind']
+
+for tech in TechnologyStatsYear[['Bioenergy','Hydro','Marine','Solar','Wind']]:
+    TechnologyStatsYear[tech]=TechnologyStatsYear[tech].cumsum()
+TechnologyStatsYear 
+
+TechnologyStatsYear['TotalCap']=TechnologyStatsYear[['Bioenergy','Hydro','Marine','Solar','Wind']].sum(axis=1,numeric_only=True)
+TechnologyStatsYear
+
+23020.0/41692.1
+
+plt.figure(figsize=(10,10))
+for tech in TechnologyStatsYear[['Bioenergy','Hydro','Marine','Solar','Wind']]:
+    X=TechnologyStatsYear['Commissioning']
+    y=TechnologyStatsYear[tech]*100/TechnologyStatsYear['TotalCap']
+    plt.plot(X,y,label=tech)
+    plt.legend()
+
+import plotly.express as px
+for tech in TechnologyStatsYear[['Bioenergy','Hydro','Marine','Solar','Wind']]:
+    fig=px.line(TechnologyStatsYear,x=TechnologyStatsYear['Commissioning'],y=TechnologyStatsYear[tech]*100/TechnologyStatsYear['TotalCap'],title=tech)
+
+    fig.update_xaxes(
+        rangeslider_visible=True,
+        rangeselector=dict(
+            buttons=list([
+                dict(count=1,label='=1 Year',step='year',stepmode='backward'),
+                dict(count=10,label='10 Years',step='year',stepmode='backward'),
+                dict(step='all')
+            ])
+        )
+    )
+    fig.show()
+
+#date=TechnologyStatsYear['Commissioning']==2020
+TechnologyStatsYear[['Commissioning','Solar','Wind','TotalCap']]
+
+#TechnologyStatsYear['Solar']+TechnologyStatsYear['Wind']
+
+(31477.3-4)*100/4/28
+
+Year=data['Commissioning'].dt.year.reset_index()
+DateCount=pd.DataFrame(Year.groupby('Commissioning').size().reset_index(name='Count'))
+DateCount.plot(kind='line',y='Count',x='Commissioning')
+
+Year=data['Commissioning'].dt.year.reset_index()
+Year['Tech']=data['Technology']
+DateCount=pd.DataFrame(Year.groupby(['Commissioning','Tech']).size().reset_index(name='Count'))
+
+
+for value in DateCount['Tech'].unique():
+    Temp=DateCount[DateCount['Tech']==value]
+    Temp.plot(kind='line',y='Count',x='Commissioning')
+    plt.title(f'{value}')
+    
+DateCount
+
+DateCount.sort_values(by='Count',ascending=False)
+
+Year=data['Commissioning'].dt.year.reset_index()
+DateCount=pd.DataFrame(Year.groupby('Commissioning').size().reset_index(name='Count'))
+DateCount[DateCount['Commissioning']>1999].sum()['Count']*100/DateCount.sum()['Count']
+
+
+Col=['Capacity(MW)','Technology','Country']
+CapByRegion=data[Col]
+CapByRegion
+
+CapByRegion.groupby('Country')['Capacity(MW)'].sum().plot(kind='pie',autopct='%1.1f%%',figsize=(10,10))
+
+Test=CapByRegion.groupby(['Technology','Country']).sum().reset_index()
+print(Test)
+
+Test.pivot(index='Country',columns='Technology',values='Capacity(MW)').reset_index().plot(x='Country',kind='bar',figsize=(10,10))
+
+Test['Percentage']=Test['Capacity(MW)']*100/Test['Capacity(MW)'].sum()
+Test
+
+for Country in set(CapByRegion['Country']):
+    plt.subplots()
+    Temp=CapByRegion['Country']==Country
+    CapByRegion[Temp].groupby('Technology').sum()['Capacity(MW)'].plot(kind='pie',y='Capacity',autopct='%1.1f%%',ylabel='',figsize=(25,20))
+    plt.title(f'Share of instaled Capacity in {Country}')
+
+table=data[['Country','Capacity(MW)']].groupby('Country').size().reset_index(name='Number of Projects')
+table['Capacity(MW)']=list(data[['Country','Capacity(MW)']].groupby('Country').sum()['Capacity(MW)'])
+table['Capacity per Project (MW)']=table['Capacity(MW)']/table['Number of Projects']
+table
+
+Tech = data['Technology']=='Wind'
+Tech2 = data['Technology']=='Solar'
+
+display(data[Tech][['Capacity(MW)','number_of_turbines']].groupby('number_of_turbines').describe())
+
+display(data[Tech2][['Capacity(MW)','Solar Mounting Type']].groupby('Solar Mounting Type').describe())
+data[Tech2][['Capacity(MW)','Solar Mounting Type']].groupby('Solar Mounting Type').sum().plot(kind='pie',autopct='%1.1f%%',y='Capacity(MW)',figsize=(15,15))
+
+
+OnshoreCap=data[['Capacity(MW)','Onshore']].groupby('Onshore').sum()
+display(OnshoreCap)
+OnshoreCap.plot(kind='pie',y='Capacity(MW)',autopct='%1.1f%%',legend=None, figsize=(10,10))
+
+##First offshore wind project
+FirstWind=data[['Capacity(MW)','Onshore','Commissioning']]
+
+FirstWind[FirstWind['Onshore']=='No']
+
+test=data[['Capacity(MW)','Technology','Sub Technology']]
+condition=(test['Technology']=='Hydro') & (test['Sub Technology']=='Pumped Storage')
+
+test[condition]
+
+data[['Capacity(MW)','Sub Technology']].groupby('Sub Technology').sum().plot(kind='pie',autopct='%1.1f%%',y='Capacity(MW)', figsize=(10,10))
+
+CapTech=data[['Capacity(MW)','Technology']]
+NumberofProjectsByTechnology=CapTech.groupby('Technology').size()
+Table=CapTech.groupby('Technology').sum()
+Table['Number of Projects']=list(CapTech.groupby('Technology').size())
+
+
+Table['Capacity per Project(MW)']=Table['Capacity(MW)']/Table['Number of Projects']
+Table
+
+CapTech.groupby('Technology').describe()
+
+Test=set(data['Technology'])
+Test
+CapTech=data[['Capacity(MW)','Technology']]
+for Tech in Test:
+    CapTech[CapTech['Technology']==Tech].plot(kind='hist',bins=60,title=Tech,figsize=(10,10))
+    display(Tech,CapTech[CapTech['Technology']==Tech].describe()) 
+
+#CapTech=data[['Capacity(MW)','Technology']]
+
+#CapTech[CapTech['Technology']=='Hydro'].plot(kind='hist',bins=60,figsize=(10,10))
+#display(CapTech[CapTech['Technology']=='Hydro'].describe())
+
+condition=(CapTech['Technology']=='Hydro') & (CapTech['Capacity(MW)']!=1728)
+CapTech[condition]['Capacity(MW)'].mean()
+
+TimeSeriesTech=data[['Capacity(MW)','Technology','Commissioning']]
+TimeSeriesTech['Commissioning']=TimeSeriesTech['Commissioning'].dt.year
+TimeSeriesTech=TimeSeriesTech.groupby(['Technology','Commissioning']).sum().reset_index()
+print(TimeSeriesTech)
+
+for Tech in set(TimeSeriesTech['Technology']):
+    X=TimeSeriesTech[TimeSeriesTech['Technology']==Tech]['Commissioning']
+    y=TimeSeriesTech[TimeSeriesTech['Technology']==Tech]['Capacity(MW)']
+    plt.plot(X,y,label=Tech)
+    plt.legend()
+
+Temp=data['Technology']=='Wind'
+winddata=data[Temp][['Commissioning','Capacity(MW)','capacity_individual_turbine','number_of_turbines']]
+winddata['Commissioning']=winddata['Commissioning'].dt.year
+winddata[['Commissioning','capacity_individual_turbine']].groupby('Commissioning').mean().plot(kind='line')
+
+winddata
+
+TechEvo=data[['Capacity(MW)','Commissioning','Technology']]
+TechEvo['Commissioning']=TechEvo['Commissioning'].dt.year
+
+TechEvo
+
+operator=data[['operator','Capacity(MW)']].groupby('operator').size()
+pd.DataFrame(operator.sort_values(ascending=False).head(5))
+
+
+operator=data[['operator','Capacity(MW)']].groupby('operator').sum()
+operator.sort_values(by='Capacity(MW)',ascending=False).head(5)
+
