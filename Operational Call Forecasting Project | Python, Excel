@@ -1,0 +1,395 @@
+Importing my Modules
+import pandas as pd
+import matplotlib.pyplot as plt
+from datetime import datetime
+import matplotlib as mpl
+import numpy as np
+from statsmodels.tsa.seasonal import seasonal_decompose, STL
+from statsmodels.tsa.stattools import adfuller
+from pmdarima import auto_arima, ARIMA
+from statsforecast import StatsForecast
+from statsforecast.models import Naive, HistoricAverage, WindowAverage, SeasonalNaive
+from utilsforecast.plotting import plot_series
+from sklearn.metrics import mean_absolute_error as mae
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+from prophet import Prophet
+
+data=pd.read_csv(r'C:\Users\Dylan\Desktop\Forecasting and Planning Analyst Task Data.csv')
+data.columns
+data=data[['Date', 'Time Period', 'Calls Offered (SS)', 'Calls Answered (SS)',
+       'Average Handle Time (SS)']]
+data.dtypes
+
+data['Date']=pd.to_datetime(data['Date'],format='mixed',dayfirst=True)
+data.dtypes
+data
+
+data.columns
+
+EDA
+data.describe()
+
+data['Month']=data['Date'].dt.strftime("%B")
+data['Day']=data['Date'].dt.strftime("%A")
+data
+
+GroupedByDayTable=data[['Date','Calls Offered (SS)','Calls Answered (SS)']].groupby('Date').sum().reset_index()
+
+GroupedByDayTable
+
+GroupedByDayTable['Month']=GroupedByDayTable['Date'].dt.strftime("%B")
+GroupedByDayTable
+
+GroupedByDayTable['Day']=GroupedByDayTable['Date'].dt.strftime("%A")
+GroupedByDayTable
+
+GroupedByDayTable['Calls Missed']=GroupedByDayTable['Calls Offered (SS)']-GroupedByDayTable['Calls Answered (SS)']
+GroupedByDayTable
+
+GroupedByDayTable[GroupedByDayTable['Calls Missed']<0] #'##Checking no mistakes in Call data
+GroupedByDayTable
+
+General Trend in Calls Offered: We see a clear positive trend across the year with an 54% increase from 1st October 2024 to 1st October 2025
+
+plt.plot(GroupedByDayTable['Date'],GroupedByDayTable['Calls Offered (SS)']) ###I can use this Trend to help me understand patterns in incoming calls,
+# such as this weekly pattern we see below, this will be fawed out more in our Time Series Analysis.
+
+#Trend Observations:  Inbound Calls average apears to double.
+
+
+left=datetime.dt(2024,10,1)
+right=datetime.datetime(2024,12,1)
+plt.xlim(left,right) 
+
+GroupedByDayTable.describe()
+
+High = int(GroupedByDayTable[GroupedByDayTable['Date']=='2025-10-01']['Calls Offered (SS)'])
+Low = int(GroupedByDayTable[GroupedByDayTable['Date']=='2024-10-01']['Calls Offered (SS)'])
+
+PercentageGrowth=(High-Low)*100/Low
+PercentageGrowth
+
+Call Distrubution Days of Week: In the following analysis I look at the distrubutions of incoming calls,investigating how different days of the week have vastly different descriptive statistics: Mean, Std
+
+plt.figure(figsize=(12,12))
+GroupedByDayTable[['Day','Calls Offered (SS)','Calls Answered (SS)','Calls Missed']].groupby('Day').sum()
+
+## Creating Hist plots to visulise the mean, standard deviation and spread of the call per day of week##
+for day in GroupedByDayTable['Day'].unique():
+    Data_day=GroupedByDayTable[GroupedByDayTable['Day']==day]
+    display(day,Data_day['Calls Offered (SS)'].plot(kind='hist',bins=20),Data_day['Calls Offered (SS)'].describe())
+    plt.title(f"{day} Call Distribution")
+    plt.show()
+
+
+Data_day['Calls Offered (SS)'].describe()
+
+Call Distrubution Month of Year: In the following analysis I look at the distrubutions of incoming calls,investigating how different Months of the Year have vastly different descriptive statistics: Mean, Std
+
+GroupedByDayTable[['Month','Calls Offered (SS)','Calls Answered (SS)','Calls Missed']].groupby('Month').sum()
+
+for Month in GroupedByDayTable['Month'].unique():
+    Data_Month=GroupedByDayTable[GroupedByDayTable['Month']==Month]
+    display(Month,Data_Month['Calls Offered (SS)'].plot(kind='hist',bins=20),Data_Month['Calls Offered (SS)'].describe())
+    plt.title(f"{Month} Call Distribution")
+    plt.show()
+
+Call Distrubution Time of Day: In the following analysis I look at the distrubutions of incoming calls,investigating how different Times of the Day have vastly different descriptive statistics: Mean, Std
+
+for Time in data['Time Period'].unique():
+    Data_Time=data[data['Time Period']==Time]
+    display(Time,Data_Time['Calls Offered (SS)'].plot(kind='hist',bins=20),Data_Time['Calls Offered (SS)'].describe())
+    plt.title(f"{Time} Call Distribution")
+    plt.show()
+
+ahs_seconds = pd.to_timedelta(data['Average Handle Time (SS)']).dt.total_seconds()
+
+AHS_mins=ahs_seconds/60
+AHS_mins
+
+data['AHS_Mins']=AHS_mins
+display(data)
+
+data['AHS_Mins'].mean()
+
+AHSGroup=data[['Month','AHS_Mins']].groupby('Month').mean().reset_index()
+AHSGroup
+
+AHSGroup=data[['Day','AHS_Mins']].groupby('Day').mean().reset_index()
+AHSGroup
+
+Time Series Analysis (Forecast Model)
+
+data=pd.read_csv(r'C:\Users\Dylan\Desktop\Forecasting and Planning Analyst Task Data.csv',parse_dates=[['Date', 'Time Period']],dayfirst=True)
+
+data=data[['Date_Time Period', 'Calls Offered (SS)', 'Calls Answered (SS)',
+       'Average Handle Time (SS)']]
+display(data.dtypes)
+data.info()
+data_non_indexed=data.copy()
+data=data.set_index('Date_Time Period')
+
+data.head()
+
+data.loc['2024':'2025']
+CallOffered=data['Calls Offered (SS)']
+CallOffered
+CallOffered.plot(grid=True,figsize=(10,10))
+
+
+import plotly.express as px
+fig=px.line(data_non_indexed,x='Date_Time Period',y='Calls Offered (SS)',title='Calls Offered')
+
+fig.update_xaxes(
+    rangeslider_visible=True,
+    rangeselector=dict(
+        buttons=list([
+            dict(count=1,label='1 Month',step='month',stepmode='backward'),
+            dict(count=2,label='1 Day',step='day',stepmode='backward'),
+            dict(step='all')
+        ])
+    )
+)
+fig.show()
+
+
+CallOffered.resample('D').mean().plot()
+CallOffered.resample('W').mean().plot() ## Clear increase in overall Incoming calls, comparing October 2024 to October 2025 
+CallOffered.resample('ME').mean().plot()
+CallOffered.resample('QE').mean().plot()
+
+Oct24=int(CallOffered.resample('ME').mean()['2024-10-31'])
+Oct25=int(CallOffered.resample('ME').mean()['2025-10-31'])
+
+(Oct25-Oct24)*100/Oct24
+
+
+CallOffered[:5].diff()
+
+pd.concat([CallOffered,CallOffered.diff(2),CallOffered.diff()],axis=1).plot(figsize=(10,10)) ### Is the data stationary?
+
+Time Series Decomposition: Trend, Seasonality, Residual (Noise)
+
+CallOffered['2024-10'].count()
+CallOffered['2024-11'].count()
+28*3
+
+Addative_decomp=seasonal_decompose(CallOffered,model='addative',period=30) ### Look into the period issue find a work around or solution
+
+Addative_decomp.plot()
+plt.xticks(rotation=45, fontsize= 10)
+plt.show()
+
+
+Addative_decomp=seasonal_decompose(CallOffered.resample('D').sum(),model='addative',period=28)
+
+Addative_decomp.plot()
+plt.xticks(rotation=45, fontsize= 10)
+plt.show()
+
+Addative_decomp=seasonal_decompose(CallOffered.resample('D').sum(),model='addative',period=30)
+
+Addative_decomp.plot()
+plt.xticks(rotation=45, fontsize= 10)
+plt.show()
+
+CallOffered.diff().plot()
+adfuller(CallOffered.diff().dropna())[1] ### This confirms the data is stationary and we can use the Addative models
+
+###DECOMP ON STATIONARY DATA I DONT KNOW WHY THIS WAS DONE####
+
+Addative_decomp=seasonal_decompose(CallOffered.diff().resample('D').sum(),model='addative',period=7) ### Time Series with Stationary dat?? WHY??
+
+Addative_decomp.plot()
+plt.xticks(rotation=45, fontsize= 10)
+plt.show()
+
+STL decomposition
+
+stl=STL(CallOffered.diff().resample('D').sum(),period=7,robust=True)
+stl_result=stl.fit()
+stl_result.plot()
+plt.show() 
+
+Baseline Model
+
+new=data.resample('D').sum()
+new['Missed']=new['Calls Offered (SS)']-new['Calls Answered (SS)']
+new['2025-10']
+
+Time Series Models: Forecasting 3-6 Months. ARIMA Model
+
+df=CallOffered.resample('D').sum()
+df=pd.DataFrame(df)
+df
+
+len(df)-91 ### Used 91 beacuse this is the average amount of days in 3 months this could be more specific depending on months being forecasted
+Train,Test=df.iloc[:297],df.iloc[297:]
+
+pd.concat([Test,Train],axis=1).plot()
+
+bench_model=ARIMA(order=(1,1,1),maxiter=100)
+bench_arima_prediction=bench_model.fit_predict(Train,n_periods=91)
+
+plt.figure(figsize=(12,12))
+plt.plot(Test.index,Test.values,color='black')
+plt.plot(Train.index,Train)
+plt.plot(bench_arima_prediction.index,bench_arima_prediction,ls='--')
+
+plt.grid(True)
+plt.show()
+
+bench_model.summary()
+
+auto_arima1=auto_arima(Train,m=7,supress_warning=True, maxiter=100)
+auto_arima1_predictions=auto_arima1.fit_predict(Train,n_periods=91)
+
+plt.figure(figsize=(12,12))
+plt.plot(Test.index,Test.values,color='black')
+plt.plot(Train.index,Train)
+plt.plot(auto_arima1_predictions.index,auto_arima1_predictions,ls='--')
+
+plt.grid(True)
+plt.show()
+
+auto_arima1.summary()
+
+#pd.concat([arima1_predictions,Test]).plot() ###This model performs well in the first 5 or so weeks 
+This model from observation is picking up on the day to day seasonality of data but is not picking up on the increasing general trend of the data
+
+
+####2nd Best (Eeasiest of the two))
+
+bench_arima=auto_arima(Train,m=7,p=3,d=1,start_q=1,max_q=7,maxiter=1000,supress_warning=True)
+bench_arima_prediction_7=bench_arima.fit_predict(Train,n_periods=91)
+bench_arima_prediction_7
+
+plt.figure(figsize=(12,12))
+
+plt.plot(Test.index,Test.values,color='black')
+plt.plot(Train.index,Train)
+plt.plot(bench_arima_prediction_7.index,bench_arima_prediction_7,ls='--')
+
+plt.grid(True)
+plt.show()
+
+bench_arima.summary()
+
+#### Best Model ###
+
+sarima=SARIMAX(Train,order=(5,0,1),seasonal_order=(1,0,1,7),trend=[1,1,1])
+results=sarima.fit(method='powell')
+sarima_prediction=results.get_prediction(start=Test.index[0],end=Test.index[-1])
+sarima_prediction=results.forecast(steps=len(Test))
+results.summary()
+
+plt.figure(figsize=(12,12))
+
+plt.plot(Test.index,Test.values,color='black')
+plt.plot(Train.index,Train)
+plt.plot(sarima_prediction.index,sarima_prediction,ls='--')
+
+plt.grid(True)
+plt.show()
+
+Headcount=Train.copy()
+
+Headcount['People']=Headcount['Calls Offered (SS)']/64
+round(Headcount)['People'].plot()
+
+###Test best version
+
+bench_arima=auto_arima(Train,m=7,p=3,d=1,start_q=1,max_q=7,maxiter=1000,supress_warning=True)
+bench_arima_prediction_7=bench_arima.fit_predict(Train,n_periods=91)
+bench_arima_prediction_7
+
+plt.figure(figsize=(12,12))
+
+plt.plot(Test.index,Test.values,color='black')
+plt.plot(Train.index,Train)
+plt.plot(bench_arima_prediction2.index,bench_arima_prediction2,ls='--')
+
+plt.grid(True)
+plt.show()
+
+bench_arima.summary()
+
+bench_arima=auto_arima(Train,m=14,p=3,d=1,start_q=1,max_q=7,maxiter=1000,supress_warning=True)
+bench_arima_prediction_14=bench_arima.fit_predict(Train,n_periods=91)
+bench_arima_prediction_28
+
+plt.figure(figsize=(12,12))
+
+plt.plot(Test.index,Test.values,color='black')
+plt.plot(Train.index,Train)
+plt.plot(bench_arima_prediction_14.index,bench_arima_prediction_14,ls='--')
+
+plt.grid(True)
+plt.show()
+
+bench_arima.summary()
+
+bench_arima=auto_arima(Train,m=14,p=3,d=1,start_q=1,max_q=7,maxiter=1000,supress_warning=True)
+bench_arima_prediction_28=bench_arima.fit_predict(Train,n_periods=91)
+bench_arima_prediction_28
+
+plt.figure(figsize=(12,12))
+
+plt.plot(Test.index,Test.values,color='black')
+plt.plot(Train.index,Train)
+plt.plot(bench_arima_prediction_28.index,bench_arima_prediction_28,ls='--')
+
+plt.grid(True)
+plt.show()
+
+bench_arima.summary()
+
+df=Train.reset_index().rename(columns={'Date_Time Period':'ds','Calls Offered (SS)':'y'})
+df1=Test.reset_index().rename(columns={'Date_Time Period':'ds','Calls Offered (SS)':'y'})
+
+%%time
+Prop_model=Prophet()
+Prop_model.fit(df)
+prophet=Prop_model.predict(df1)
+Prop_model.predict(df1)['yhat']
+
+plt.figure(figsize=(12,12))
+
+plt.plot(Test.index,Test.values,color='black')
+plt.plot(Train.index,Train)
+plt.plot(Test.index,Prop_model.predict(df1)['yhat'],ls='--')
+
+plt.grid(True)
+plt.show()
+
+Prop_model.plot_components(prophet)
+
+models=[prophet['yhat'],sarima_prediction,bench_arima_prediction_7,auto_arima1_predictions,
+        bench_arima_prediction_28,bench_arima_prediction_14]
+models
+
+Results=[]
+for model in models:
+    results=mae(Test,model)
+    Results.append(results)
+Results
+
+Results= [5397.008262594064,
+ 3288.9266868300324,
+ 4959.5229604339775,
+ 5655.5674194490975,
+ 29106.382204072335,
+ 29106.382204072335]
+
+
+data['Calls Missed']=data['Calls Offered (SS)']-data['Calls Answered (SS)']
+data
+
+data.resample('h').sum().plot()
+data.resample('D').sum().plot()
+data.resample('W').sum().plot() ## Clear increase in overall Incoming calls, comparing October 2024 to October 2025 
+data.resample('ME').sum().plot()
+data.resample('QE').sum().plot()
+plt.legend()
+
+data.resample('D').sum()
